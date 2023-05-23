@@ -1,38 +1,90 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Next.js issue with middleware/catch-all/rewrites/getInitialProps when client side navigation occurs
 
-## Getting Started
+**Must be built with `npm run build` and started with `npm run start` for the issue to appear. It works in development mode with `npm run dev`.**
 
-First, run the development server:
+## Reproduction steps
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
+`next.config.js`:
+
+```js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  async rewrites() {
+    return [
+      {
+        source: '/:nodeSlugs*/test2',
+        destination: '/test/:nodeSlugs*?slug=test2',
+      },
+    ]
+  }
+}
+
+module.exports = nextConfig
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Existence of `middleware.ts` file. Can be an empty file to reproduce the issue.
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+`src/middleware.ts`:
 
-[API routes](https://nextjs.org/docs/api-routes/introduction) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+```ts
+export function middleware() {
+}
+ 
+```
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/api-routes/introduction) instead of React pages.
+Catch-all page route eg. `src/pages/test/[...slugs].js`.
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+Must have `getInitialProps` for this issue to appear. It works when server rendering, but does not work on client side navigation.
 
-## Learn More
+`src/pages/test/[...slugs].js`:
 
-To learn more about Next.js, take a look at the following resources:
+```tsx
+import Link from 'next/link';
+import { NextPageContext } from 'next';
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+export default function Test() {
+	return (
+		<p>
+			<Link href="/something1/test2">something1/test2</Link> -
+			<Link href="/something2/test2">something2/test2</Link>
+		</p>
+	)
+}
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+Test.getInitialProps = async (ctx: NextPageContext) => {
+	console.log({query: ctx.query})
+  return { test: 'works' };
+};
+```
 
-## Deploy on Vercel
+## Issue
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open the browser on `http://localhost:3000/something1/test2`, and click on the link "something2/test2".
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+If you check the console log (in the browser) after a client side navigation event, you will not see `slugs`, but only `slug`. On server rendering this works properly. You get both `slugs` and `slug` in the console.
+
+## Solution
+
+There are two solutions:
+1. you can remove one of: rewrite rule, middleware file, getInitialProps, or stop using catch-all
+2. explicitly pass catch-all variable `slugs` to the page params (see example bellow)
+
+Example: `next.config.js`:
+
+```js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  async rewrites() {
+    return [
+      {
+        source: '/:nodeSlugs*/test2',
+        destination: '/test/:nodeSlugs*?slug=test2?slugs=:nodeSlugs*',
+      },
+    ]
+  }
+}
+
+module.exports = nextConfig
+```
